@@ -330,8 +330,10 @@ class MiInterfaz(QWidget):
 
             self.ip_servidor = data.get("ip_servidor")
             self.puerto_servidor = data.get("puerto_servidor")
+            self.url_publica = data.get("url_publica")
             print("💻 IP del servidor:", self.ip_servidor)
             print("🔌 Puerto del servidor:", self.puerto_servidor)
+            print("💻 URL del servidor:", self.puerto_servidor)
 
             usuario = data.get("user", "")
             for w in login_widgets:
@@ -389,9 +391,10 @@ class MiInterfaz(QWidget):
     def activar_streaming(self):
         """Activa las cámaras del servidor y obtiene la lista de cámaras disponibles - OPTIMIZADO"""
         print(f"🔧 Activando streaming...")
+        base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
 
-        url_activar = f"http://{self.ip_servidor}:{self.puerto_servidor}/activar-camara"
-        url_camaras = f"http://{self.ip_servidor}:{self.puerto_servidor}/listar-camaras"
+        url_activar = f"{base_url}/activar-camara"
+        url_camaras = f"{base_url}/listar-camaras"
 
         try:
             # 1. Cambiar UI inmediatamente para dar feedback rápido
@@ -522,6 +525,104 @@ class MiInterfaz(QWidget):
         except Exception:
             pass  # Ignorar errores
 
+    def activar_streaming(self):
+        """Activa las cámaras del servidor y obtiene la lista de cámaras disponibles"""
+        print(f"🔧 Activando streaming...")
+
+        # ✅ Usa la URL pública si está disponible, sino usa IP local
+        base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
+
+        url_activar = f"{base_url}/activar-camara"
+        url_camaras = f"{base_url}/listar-camaras"
+
+        try:
+            # 1. Cambiar UI inmediatamente para dar feedback rápido
+            self.boton_camara_remota.setText("Conectando...")
+            self.label_video.setText("Activando cámaras...")
+            self.label_video.setStyleSheet("color: #333333; font-size: 16px; background: transparent;")
+            QApplication.processEvents()
+
+            # 2. Activar cámaras
+            print("📡 Enviando petición para activar cámaras...")
+            response = requests.get(url_activar, timeout=5)
+            print(f"📨 Respuesta activar: {response.status_code}")
+
+            if response.status_code != 200:
+                error_msg = f"No se pudo activar las cámaras: {response.status_code}"
+                print(f"❌ {error_msg}")
+                QMessageBox.warning(self, "Error", error_msg)
+                self.boton_camara_remota.setText("Activar Cámaras")
+                self.label_video.clear()
+                return
+
+            # 3. Espera y obtener lista de cámaras
+            self.label_video.setText("Obteniendo lista de cámaras...")
+            QApplication.processEvents()
+            import time
+            time.sleep(1)
+
+            print("📡 Solicitando lista de cámaras...")
+            response_camaras = requests.get(url_camaras, timeout=5)
+            print(f"📨 Respuesta lista cámaras: {response_camaras.status_code}")
+
+            if response_camaras.status_code == 200:
+                data = response_camaras.json()
+                print(f"📋 Datos recibidos: {data}")
+
+                self.camaras_disponibles = data.get("camaras", [])
+                print(f"📹 Cámaras disponibles: {self.camaras_disponibles}")
+
+                if not self.camaras_disponibles:
+                    self.label_video.setText("El sistema no detecta ninguna cámara")
+                    self.label_video.setStyleSheet(
+                        "color: #ff6b6b; font-size: 18px; font-weight: bold; background: transparent;")
+                    self.boton_camara_remota.setText("Activar Cámaras")
+                    return
+
+                camara_activa = data.get("camara_activa", False)
+                print(f"🟢 Estado cámaras activas: {camara_activa}")
+
+                if not camara_activa:
+                    QMessageBox.warning(self, "Advertencia", "Las cámaras no están activas en el servidor")
+                    self.boton_camara_remota.setText("Activar Cámaras")
+                    self.label_video.clear()
+                    return
+
+                # 4. Iniciar streaming
+                self.label_video.setText("Iniciando transmisión...")
+                QApplication.processEvents()
+
+                self.camara_actual = 0
+                self.iniciar_video_stream()
+                self.streaming_activo = True
+                self.boton_camara_remota.setText("Desactivar")
+                self.mostrar_controles_navegacion()
+
+            else:
+                error_msg = f"No se pudo obtener la lista de cámaras: {response_camaras.status_code}"
+                print(f"❌ {error_msg}")
+                QMessageBox.warning(self, "Error", error_msg)
+                self.boton_camara_remota.setText("Activar Cámaras")
+
+        except requests.exceptions.Timeout:
+            error_msg = "Tiempo de espera agotado al conectar con el servidor"
+            print(f"⏰ {error_msg}")
+            QMessageBox.critical(self, "Error de conexión", error_msg)
+            self.boton_camara_remota.setText("Activar Cámaras")
+            self.label_video.clear()
+        except requests.exceptions.ConnectionError:
+            error_msg = "No se pudo conectar con el servidor de cámaras"
+            print(f"🔌 {error_msg}")
+            QMessageBox.critical(self, "Error de conexión", error_msg)
+            self.boton_camara_remota.setText("Activar Cámaras")
+            self.label_video.clear()
+        except Exception as e:
+            error_msg = f"Error inesperado: {str(e)}"
+            print(f"💥 {error_msg}")
+            QMessageBox.critical(self, "Error", error_msg)
+            self.boton_camara_remota.setText("Activar Cámaras")
+            self.label_video.clear()
+
     def iniciar_video_stream(self):
         """Inicia el stream de video de la cámara actual"""
         if self.video_thread:
@@ -533,8 +634,11 @@ class MiInterfaz(QWidget):
             print("❌ No hay cámaras disponibles")
             return
 
+        # ✅ Usa la URL pública si está disponible, sino usa IP local
+        base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
+
         cam_id = self.camaras_disponibles[self.camara_actual]
-        url = f"http://{self.ip_servidor}:{self.puerto_servidor}/video/{cam_id}"
+        url = f"{base_url}/video/{cam_id}"
 
         print(f"🎥 Iniciando stream de cámara {cam_id}")
         print(f"🔗 URL stream: {url}")
