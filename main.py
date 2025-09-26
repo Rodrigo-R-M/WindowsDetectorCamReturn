@@ -1,7 +1,9 @@
+# main.py (cliente PyQt6) - versión corregida y limpia
 import sys
 import requests
 import os
 import pickle
+import json
 import cv2
 import numpy as np
 import urllib.request
@@ -25,34 +27,23 @@ class VideoThread(QThread):
 
     def run(self):
         self.running = True
-
         try:
-            # Usar urllib para abrir el stream HTTP
             stream = urllib.request.urlopen(self.url, timeout=10)
             bytes_data = bytes()
-
             while self.running:
                 chunk = stream.read(1024)
                 if not chunk:
                     break
-
                 bytes_data += chunk
-
-                # Buscar el inicio y fin de un frame JPEG
-                a = bytes_data.find(b'\xff\xd8')  # Inicio JPEG
-                b = bytes_data.find(b'\xff\xd9')  # Fin JPEG
-
+                a = bytes_data.find(b'\xff\xd8')
+                b = bytes_data.find(b'\xff\xd9')
                 if a != -1 and b != -1:
                     jpg = bytes_data[a:b + 2]
                     bytes_data = bytes_data[b + 2:]
-
-                    # Decodificar la imagen
                     img_array = np.frombuffer(jpg, dtype=np.uint8)
                     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-
                     if frame is not None:
                         self.frame_received.emit(frame)
-
         except Exception as e:
             error_msg = f"Error en stream: {str(e)}"
             print(f"❌ {error_msg}")
@@ -65,7 +56,7 @@ class VideoThread(QThread):
 
     def stop(self):
         self.running = False
-        self.wait(3000)  # Esperar máximo 3 segundos
+        self.wait(3000)
 
 
 class MiInterfaz(QWidget):
@@ -76,6 +67,7 @@ class MiInterfaz(QWidget):
         self.session = requests.Session()
         self.ip_servidor = None
         self.puerto_servidor = None
+        self.url_publica = None
         self.camaras_disponibles = []
         self.camara_actual = 0
         self.streaming_activo = False
@@ -143,7 +135,6 @@ class MiInterfaz(QWidget):
         self.label_titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label_titulo.setFixedHeight(80)
 
-        # Inputs de login
         self.input_usuario_login = QLineEdit()
         self.input_usuario_login.setPlaceholderText("Usuario")
         self.input_usuario_login.setFixedWidth(100)
@@ -160,7 +151,6 @@ class MiInterfaz(QWidget):
         self.label_usuario.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.label_usuario.hide()
 
-        # Botones de control
         self.boton_login = QPushButton("Iniciar sesión")
         self.boton_register = QPushButton("Registrarse")
         self.boton_logout = QPushButton("Cerrar sesión")
@@ -169,21 +159,20 @@ class MiInterfaz(QWidget):
         self.boton_camara_remota = QPushButton("Activar Cámaras")
         self.boton_camara_remota.setObjectName("boton_camara")
         self.boton_camara_remota.setStyleSheet("""
-                    QPushButton#boton_camara {
-                        background-color: #1E3A8A;
-                        border: none;
-                        border-radius: 50px;
-                        padding: 8px;
-                        min-width: 80px;
-                        max-width: 120px;
-                        text-align: left;
-                        padding-left: 10px;
-
-                    }
-                    QPushButton#boton_camara:hover {
-                        background-color: #0E2A68;
-                    }
-                """)
+            QPushButton#boton_camara {
+                background-color: #1E3A8A;
+                border: none;
+                border-radius: 50px;
+                padding: 8px;
+                min-width: 80px;
+                max-width: 120px;
+                text-align: left;
+                padding-left: 10px;
+            }
+            QPushButton#boton_camara:hover {
+                background-color: #0E2A68;
+            }
+        """)
         self.boton_camara_remota.clicked.connect(self.llamar_cambio_estado)
         self.boton_camara_remota.hide()
 
@@ -191,11 +180,10 @@ class MiInterfaz(QWidget):
         self.boton_register.clicked.connect(self.abrir_registro)
         self.boton_logout.clicked.connect(self.cerrar_sesion)
 
-        # Setup del menú - MODIFICADO PARA POSICIONAR EL BOTÓN MÁS A LA IZQUIERDA
         self.menu_widget = QWidget()
         self.menu_layout = QVBoxLayout()
         self.menu_layout.setSpacing(20)
-        self.menu_layout.setContentsMargins(5, 10, 15, 10)  # Reducido margen derecho
+        self.menu_layout.setContentsMargins(5, 10, 15, 10)
 
         self.menu_layout.addWidget(self.input_usuario_login)
         self.menu_layout.addWidget(self.input_password_login)
@@ -204,10 +192,9 @@ class MiInterfaz(QWidget):
         self.menu_layout.addWidget(self.label_usuario)
         self.menu_layout.addWidget(self.boton_logout)
 
-        # Layout especial para el botón de cámara más a la izquierda
         self.layout_boton_camara = QHBoxLayout()
         self.layout_boton_camara.addWidget(self.boton_camara_remota)
-        self.layout_boton_camara.addStretch()  # Empuja el botón hacia la izquierda
+        self.layout_boton_camara.addStretch()
         self.menu_layout.addLayout(self.layout_boton_camara)
 
         self.menu_layout.addStretch(1)
@@ -215,20 +202,16 @@ class MiInterfaz(QWidget):
         self.menu_widget.setLayout(self.menu_layout)
         self.menu_widget.setMaximumWidth(120)
 
-        # Área principal para mostrar video
         self.area_principal = QFrame()
         self.area_principal.setMinimumSize(400, 350)
 
-        # Layout del área principal
         self.layout_area_principal = QVBoxLayout(self.area_principal)
 
-        # Label para mostrar video - SIN TEXTO INICIAL
-        self.label_video = QLabel("")  # CAMBIADO: Sin texto inicial
+        self.label_video = QLabel("")
         self.label_video.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.label_video.setStyleSheet("background: transparent;")  # CAMBIADO: Sin color de texto
+        self.label_video.setStyleSheet("background: transparent;")
         self.label_video.setMinimumSize(400, 300)
 
-        # Controles de navegación
         self.controls_widget = QWidget()
         self.controls_widget.setStyleSheet("background: transparent;")
         self.controls_layout = QHBoxLayout(self.controls_widget)
@@ -257,7 +240,6 @@ class MiInterfaz(QWidget):
         self.layout_area_principal.addWidget(self.label_video)
         self.layout_area_principal.addWidget(self.controls_widget)
 
-        # Layout principal
         layout_principal = QVBoxLayout()
         layout_superior = QHBoxLayout()
         layout_superior.addWidget(self.boton_toggle)
@@ -310,15 +292,8 @@ class MiInterfaz(QWidget):
         try:
             resp = self.session.get("https://apidetectorcamreturn.onrender.com/check-auth")
             logged_in = (resp.status_code == 200)
-        except requests.exceptions.RequestException:
+        except:
             logged_in = False
-
-        login_widgets = (
-            self.input_usuario_login,
-            self.input_password_login,
-            self.boton_login,
-            self.boton_register,
-        )
 
         if logged_in:
             data = resp.json()
@@ -330,21 +305,30 @@ class MiInterfaz(QWidget):
 
             self.ip_servidor = data.get("ip_servidor")
             self.puerto_servidor = data.get("puerto_servidor")
-            self.url_publica = data.get("url_publica")
-            print("💻 IP del servidor:", self.ip_servidor)
-            print("🔌 Puerto del servidor:", self.puerto_servidor)
-            print("💻 URL del servidor:", self.puerto_servidor)
+            self.url_publica = data.get("url_publica_servidor") or data.get("url_publica")
+            print(f"💻 IP del servidor: {self.ip_servidor}")
+            print(f"🔌 Puerto del servidor: {self.puerto_servidor}")
+            print(f"🌐 URL Pública: {self.url_publica}")
 
             usuario = data.get("user", "")
-            for w in login_widgets:
+            for w in (
+                    self.input_usuario_login,
+                    self.input_password_login,
+                    self.boton_login,
+                    self.boton_register
+            ):
                 w.hide()
             self.label_usuario.setText(usuario)
             self.label_usuario.show()
             self.boton_logout.show()
             self.boton_camara_remota.show()
         else:
-            self.detener_streaming()
-            for w in login_widgets:
+            for w in (
+                    self.input_usuario_login,
+                    self.input_password_login,
+                    self.boton_login,
+                    self.boton_register
+            ):
                 w.show()
             self.label_usuario.hide()
             self.boton_logout.hide()
@@ -382,30 +366,24 @@ class MiInterfaz(QWidget):
             return
 
         if not self.streaming_activo:
-            # Activar streaming
             self.activar_streaming()
         else:
-            # Desactivar streaming
             self.detener_streaming()
 
     def activar_streaming(self):
-        """Activa las cámaras del servidor y obtiene la lista de cámaras disponibles - OPTIMIZADO"""
-        print(f"🔧 Activando streaming...")
         base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
 
         url_activar = f"{base_url}/activar-camara"
         url_camaras = f"{base_url}/listar-camaras"
 
         try:
-            # 1. Cambiar UI inmediatamente para dar feedback rápido
             self.boton_camara_remota.setText("Conectando...")
             self.label_video.setText("Activando cámaras...")
             self.label_video.setStyleSheet("color: #333333; font-size: 16px; background: transparent;")
-            QApplication.processEvents()  # Actualizar UI inmediatamente
+            QApplication.processEvents()
 
-            # 2. Activar cámaras con timeout más corto
             print("📡 Enviando petición para activar cámaras...")
-            response = requests.get(url_activar, timeout=5)  # Reducido de 10 a 5 segundos
+            response = requests.get(url_activar, timeout=20)
             print(f"📨 Respuesta activar: {response.status_code}")
 
             if response.status_code != 200:
@@ -416,16 +394,13 @@ class MiInterfaz(QWidget):
                 self.label_video.clear()
                 return
 
-            # 3. Espera más corta y actualizar UI
             self.label_video.setText("Obteniendo lista de cámaras...")
             QApplication.processEvents()
-
             import time
-            time.sleep(1)  # Reducido de 2 a 1 segundo
+            time.sleep(1)
 
-            # 4. Obtener lista de cámaras
             print("📡 Solicitando lista de cámaras...")
-            response_camaras = requests.get(url_camaras, timeout=5)  # Reducido timeout
+            response_camaras = requests.get(url_camaras, timeout=5)
             print(f"📨 Respuesta lista cámaras: {response_camaras.status_code}")
 
             if response_camaras.status_code == 200:
@@ -442,7 +417,6 @@ class MiInterfaz(QWidget):
                     self.boton_camara_remota.setText("Activar Cámaras")
                     return
 
-                # Verificar que las cámaras estén activas
                 camara_activa = data.get("camara_activa", False)
                 print(f"🟢 Estado cámaras activas: {camara_activa}")
 
@@ -452,7 +426,6 @@ class MiInterfaz(QWidget):
                     self.label_video.clear()
                     return
 
-                # 5. Iniciar streaming inmediatamente
                 self.label_video.setText("Iniciando transmisión...")
                 QApplication.processEvents()
 
@@ -488,10 +461,7 @@ class MiInterfaz(QWidget):
             self.label_video.clear()
 
     def detener_streaming(self):
-        """Detiene el streaming y desactiva las cámaras - VERSIÓN OPTIMIZADA"""
-        # 1. Detener el thread de forma rápida
         if self.video_thread:
-            # Desconectar señales para evitar frames adicionales
             try:
                 self.video_thread.frame_received.disconnect()
             except:
@@ -499,201 +469,65 @@ class MiInterfaz(QWidget):
             self.video_thread.stop()
             self.video_thread = None
 
-        # 2. Resetear estado inmediatamente (sin esperar al servidor)
         self.streaming_activo = False
 
-        # 3. LIMPIEZA RÁPIDA Y EFICIENTE
-        # Solo crear pixmap blanco una vez, del tamaño mínimo necesario
-        pixmap_blanco = QPixmap(400, 300)  # Tamaño fijo pequeño
+        pixmap_blanco = QPixmap(400, 300)
         pixmap_blanco.fill(Qt.GlobalColor.white)
         self.label_video.setPixmap(pixmap_blanco)
 
-        # 4. Actualizar interfaz inmediatamente
         self.boton_camara_remota.setText("Activar Cámaras")
         self.ocultar_controles_navegacion()
 
-        # 5. Desactivar servidor en segundo plano (sin bloquear la UI)
         if self.ip_servidor and self.puerto_servidor:
-            # Usar QTimer para hacer la llamada al servidor de forma asíncrona
             QTimer.singleShot(100, self.desactivar_servidor_async)
 
     def desactivar_servidor_async(self):
-        """Desactiva el servidor de forma asíncrona sin bloquear la UI"""
         try:
             url = f"http://{self.ip_servidor}:{self.puerto_servidor}/desactivar-camara"
-            requests.get(url, timeout=2)  # Timeout corto
+            requests.get(url, timeout=2)
         except Exception:
-            pass  # Ignorar errores
-
-    def activar_streaming(self):
-        """Activa las cámaras del servidor y obtiene la lista de cámaras disponibles"""
-        print(f"🔧 Activando streaming...")
-
-        # ✅ Usa la URL pública si está disponible, sino usa IP local
-        base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
-
-        url_activar = f"{base_url}/activar-camara"
-        url_camaras = f"{base_url}/listar-camaras"
-
-        try:
-            # 1. Cambiar UI inmediatamente para dar feedback rápido
-            self.boton_camara_remota.setText("Conectando...")
-            self.label_video.setText("Activando cámaras...")
-            self.label_video.setStyleSheet("color: #333333; font-size: 16px; background: transparent;")
-            QApplication.processEvents()
-
-            # 2. Activar cámaras
-            print("📡 Enviando petición para activar cámaras...")
-            response = requests.get(url_activar, timeout=5)
-            print(f"📨 Respuesta activar: {response.status_code}")
-
-            if response.status_code != 200:
-                error_msg = f"No se pudo activar las cámaras: {response.status_code}"
-                print(f"❌ {error_msg}")
-                QMessageBox.warning(self, "Error", error_msg)
-                self.boton_camara_remota.setText("Activar Cámaras")
-                self.label_video.clear()
-                return
-
-            # 3. Espera y obtener lista de cámaras
-            self.label_video.setText("Obteniendo lista de cámaras...")
-            QApplication.processEvents()
-            import time
-            time.sleep(1)
-
-            print("📡 Solicitando lista de cámaras...")
-            response_camaras = requests.get(url_camaras, timeout=5)
-            print(f"📨 Respuesta lista cámaras: {response_camaras.status_code}")
-
-            if response_camaras.status_code == 200:
-                data = response_camaras.json()
-                print(f"📋 Datos recibidos: {data}")
-
-                self.camaras_disponibles = data.get("camaras", [])
-                print(f"📹 Cámaras disponibles: {self.camaras_disponibles}")
-
-                if not self.camaras_disponibles:
-                    self.label_video.setText("El sistema no detecta ninguna cámara")
-                    self.label_video.setStyleSheet(
-                        "color: #ff6b6b; font-size: 18px; font-weight: bold; background: transparent;")
-                    self.boton_camara_remota.setText("Activar Cámaras")
-                    return
-
-                camara_activa = data.get("camara_activa", False)
-                print(f"🟢 Estado cámaras activas: {camara_activa}")
-
-                if not camara_activa:
-                    QMessageBox.warning(self, "Advertencia", "Las cámaras no están activas en el servidor")
-                    self.boton_camara_remota.setText("Activar Cámaras")
-                    self.label_video.clear()
-                    return
-
-                # 4. Iniciar streaming
-                self.label_video.setText("Iniciando transmisión...")
-                QApplication.processEvents()
-
-                self.camara_actual = 0
-                self.iniciar_video_stream()
-                self.streaming_activo = True
-                self.boton_camara_remota.setText("Desactivar")
-                self.mostrar_controles_navegacion()
-
-            else:
-                error_msg = f"No se pudo obtener la lista de cámaras: {response_camaras.status_code}"
-                print(f"❌ {error_msg}")
-                QMessageBox.warning(self, "Error", error_msg)
-                self.boton_camara_remota.setText("Activar Cámaras")
-
-        except requests.exceptions.Timeout:
-            error_msg = "Tiempo de espera agotado al conectar con el servidor"
-            print(f"⏰ {error_msg}")
-            QMessageBox.critical(self, "Error de conexión", error_msg)
-            self.boton_camara_remota.setText("Activar Cámaras")
-            self.label_video.clear()
-        except requests.exceptions.ConnectionError:
-            error_msg = "No se pudo conectar con el servidor de cámaras"
-            print(f"🔌 {error_msg}")
-            QMessageBox.critical(self, "Error de conexión", error_msg)
-            self.boton_camara_remota.setText("Activar Cámaras")
-            self.label_video.clear()
-        except Exception as e:
-            error_msg = f"Error inesperado: {str(e)}"
-            print(f"💥 {error_msg}")
-            QMessageBox.critical(self, "Error", error_msg)
-            self.boton_camara_remota.setText("Activar Cámaras")
-            self.label_video.clear()
+            pass
 
     def iniciar_video_stream(self):
-        """Inicia el stream de video de la cámara actual"""
+        """Inicia el stream de video desde la URL pública con la ruta /video/{índice}"""
         if self.video_thread:
             print("🛑 Deteniendo stream anterior...")
             self.video_thread.stop()
             self.video_thread = None
 
-        if not self.camaras_disponibles:
-            print("❌ No hay cámaras disponibles")
-            return
-
-        # ✅ Usa la URL pública si está disponible, sino usa IP local
-        base_url = self.url_publica if self.url_publica else f"http://{self.ip_servidor}:{self.puerto_servidor}"
-
-        cam_id = self.camaras_disponibles[self.camara_actual]
-        url = f"{base_url}/video/{cam_id}"
-
-        print(f"🎥 Iniciando stream de cámara {cam_id}")
-        print(f"🔗 URL stream: {url}")
-
-        # Verificar que la URL responda antes de crear el thread
-        try:
-            test_request = urllib.request.Request(url)
-            test_response = urllib.request.urlopen(test_request, timeout=5)
-            content_type = test_response.getheader('Content-Type')
-            print(f"📡 Content-Type: {content_type}")
-            test_response.close()
-
-            if 'multipart/x-mixed-replace' not in str(content_type):
-                self.manejar_error_video(f"Formato de stream no válido: {content_type}")
-                return
-
-        except Exception as e:
-            error_msg = f"No se puede acceder al stream: {str(e)}"
+        if not self.url_publica:
+            error_msg = "No se tiene URL pública del servidor"
             print(f"❌ {error_msg}")
             self.manejar_error_video(error_msg)
             return
+
+        # ✅ CORREGIDO: Usar la ruta correcta del stream
+        url = f"{self.url_publica}/video/{self.camara_actual}"
+
+        print(f"🎥 Iniciando stream desde: {url}")
 
         # Crear y iniciar el thread de video
         self.video_thread = VideoThread(url)
         self.video_thread.frame_received.connect(self.mostrar_frame)
         self.video_thread.error_occurred.connect(self.manejar_error_video)
         self.video_thread.start()
-
         print("✅ Thread de video iniciado")
 
     def mostrar_frame(self, frame):
-        """Muestra un frame de video en el label - OPTIMIZADO"""
-        # Verificar rápidamente si seguimos activos
         if not self.streaming_activo:
             return
-
         try:
-            # Convertir BGR a RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             height, width, channel = rgb_frame.shape
             bytes_per_line = 3 * width
-
-            # Crear QImage
             q_image = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(q_image)
-
-            # Escalar el pixmap
             scaled_pixmap = pixmap.scaled(
                 self.label_video.size(),
                 Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                 Qt.TransformationMode.SmoothTransformation
             )
-
             self.label_video.setPixmap(scaled_pixmap)
-
         except Exception as e:
             print(f"Error al mostrar frame: {e}")
             if self.streaming_activo:
@@ -701,41 +535,34 @@ class MiInterfaz(QWidget):
                 self.label_video.setStyleSheet("color: #ff6b6b; font-size: 16px; background: transparent;")
 
     def manejar_error_video(self, error_msg):
-        """Maneja errores del stream de video"""
         self.label_video.setText(f"Error: {error_msg}")
         self.label_video.setStyleSheet("color: #ff6b6b; font-size: 16px; background: transparent;")
 
     def mostrar_controles_navegacion(self):
-        """Muestra los controles de navegación entre cámaras"""
         if len(self.camaras_disponibles) > 1:
             self.boton_anterior.show()
             self.boton_siguiente.show()
-
         self.label_camara_info.setText(f"Cámara {self.camara_actual + 1} de {len(self.camaras_disponibles)}")
         self.label_camara_info.show()
 
     def ocultar_controles_navegacion(self):
-        """Oculta los controles de navegación"""
         self.boton_anterior.hide()
         self.boton_siguiente.hide()
         self.label_camara_info.hide()
 
     def camara_anterior(self):
-        """Cambia a la cámara anterior"""
         if len(self.camaras_disponibles) > 1:
             self.camara_actual = (self.camara_actual - 1) % len(self.camaras_disponibles)
             self.iniciar_video_stream()
             self.label_camara_info.setText(f"Cámara {self.camara_actual + 1} de {len(self.camaras_disponibles)}")
 
     def camara_siguiente(self):
-        """Cambia a la siguiente cámara"""
         if len(self.camaras_disponibles) > 1:
             self.camara_actual = (self.camara_actual + 1) % len(self.camaras_disponibles)
             self.iniciar_video_stream()
             self.label_camara_info.setText(f"Cámara {self.camara_actual + 1} de {len(self.camaras_disponibles)}")
 
     def closeEvent(self, event):
-        """Maneja el cierre de la aplicación"""
         self.detener_streaming()
         event.accept()
 

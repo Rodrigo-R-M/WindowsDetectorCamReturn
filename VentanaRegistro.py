@@ -1,3 +1,4 @@
+# VentanaRegistro.py
 from PyQt6.QtWidgets import (
     QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QFrame, QMessageBox, QComboBox
 )
@@ -6,14 +7,12 @@ from PyQt6.QtCore import Qt
 import requests
 
 class VentanaRegistro(QDialog):
-    API_URL = "https://apidetectorcamreturn.onrender.com/register"
+    API_URL = "https://apidetectorcamreturn.onrender.com/register"  # ✅ Sin espacios
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Registro de usuario")
         self.setFixedSize(700, 700)
-
-        self.setStyleSheet("""/* ... estilos omitidos por brevedad ... */""")  # puedes mantener tus estilos aquí
 
         layout_principal = QVBoxLayout()
         layout_principal.setContentsMargins(40, 40, 40, 40)
@@ -47,12 +46,11 @@ class VentanaRegistro(QDialog):
             layout_contenedor.addWidget(widget)
             self.inputs[label_text] = widget
 
-        # ComboBox para tipo de usuario
         etiqueta_tipo = QLabel("Tipo de usuario:")
         layout_contenedor.addWidget(etiqueta_tipo)
 
         self.combo_tipo = QComboBox()
-        self.combo_tipo.addItems(["cliente"])  # Puedes agregar más si quieres: ["cliente", "admin", "técnico"]
+        self.combo_tipo.addItems(["cliente"])
         layout_contenedor.addWidget(self.combo_tipo)
 
         self.boton_registrar = QPushButton("Registrarse")
@@ -69,7 +67,7 @@ class VentanaRegistro(QDialog):
         email = self.inputs["Correo:"].text().strip()
         pw1 = self.inputs["Contraseña:"].text()
         pw2 = self.inputs["Confirmar contraseña:"].text()
-        tipo = self.combo_tipo.currentText()  # ya configurado en "cliente"
+        tipo = self.combo_tipo.currentText()
 
         if not all([nombre, username, email, pw1, pw2]):
             QMessageBox.warning(self, "Campos vacíos", "Rellena todos los campos.")
@@ -79,7 +77,6 @@ class VentanaRegistro(QDialog):
             return
 
         try:
-            # 1. Crear usuario CLIENTE
             resp_cliente = requests.post(self.API_URL, json={
                 "username": username,
                 "email": email,
@@ -87,7 +84,6 @@ class VentanaRegistro(QDialog):
                 "tipo": "cliente"
             })
 
-            # 2. Crear usuario SERVER con variaciones únicas
             username_server = f"{username}_server"
             email_server = f"{username}_server@example.com"
 
@@ -98,7 +94,6 @@ class VentanaRegistro(QDialog):
                 "tipo": "server"
             })
 
-            # 3. Verificamos resultado
             if resp_cliente.status_code == 200 and resp_server.status_code == 200:
                 QMessageBox.information(self, "Registro exitoso",
                                         f"Usuarios creados:\n- Cliente: {username}\n- Servidor: {username_server}")
